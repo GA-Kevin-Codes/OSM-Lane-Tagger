@@ -1,0 +1,1328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lane Tagger</title>
+<style>
+  :root{
+    color-scheme:light dark;
+    --bg:#fff;--text:#1a1a1a;--muted:#6b6b6b;--border:#e2e2e2;--panel:#f6f6f6;--accent:#3b6fe0;
+
+    --warn:#8a5a12;
+
+    /* road/viz surface colors — constant across light/dark UI theme */
+    --asphalt:#787d85;--lane-line:#ffffff;--center-yellow:#d9a916;
+    --bike-lane:#7fbf8f;--restricted:#c05a5a;--bus-lane:#c9705f;--bothways-fill:#8c7f52;
+    --parking-band:#5c6169;--parking-car:#aeb3bb;--kerb:#d6d9de;
+    --viz-arrow:#ffffff;--viz-caption:#f2f2f2;
+  }
+  body.dark{--bg:#161616;--text:#e8e8e8;--muted:#8f8f8f;--border:#333;--panel:#1f1f1f;--accent:#6fa0ff;--warn:#e3b05c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85em;color:var(--muted)}
+
+  header{display:flex;align-items:center;justify-content:space-between;max-width:960px;margin:0 auto;padding:1.5rem 1.5rem 0}
+  h1{font-size:1.1rem;margin:0;font-weight:600}
+  #darkmode{background:none;border:none;font-size:1.1rem;cursor:pointer;color:var(--text);opacity:.7;padding:2px}
+  #darkmode:hover{opacity:1}
+
+  main{max-width:960px;margin:0 auto;padding:0 1.5rem 3rem}
+  section{padding:.9rem 0;border-top:1px solid var(--border)}
+  section:first-child{border-top:none}
+  h2{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;margin:0 0 .8rem;cursor:default;width:fit-content}
+
+  .row{display:flex;flex-wrap:wrap;gap:.4rem 1.1rem;align-items:center}
+  .row+.row{margin-top:.6rem}
+  label{display:inline-flex;align-items:center;gap:.4rem;font-size:.88rem;cursor:pointer}
+  select{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.3rem .45rem;font:inherit}
+  input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
+
+  button{border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:6px;padding:.32rem .6rem;font:inherit;cursor:pointer}
+  button:hover{background:var(--panel)}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  .primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .primary:hover{opacity:.88;background:var(--accent)}
+
+  pre{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:.75rem;font-size:.82rem;overflow:auto;white-space:pre-wrap;margin:0 0 .6rem}
+
+  /* lane editor */
+  .lane-row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:stretch}
+  .lane-card{border:1px solid var(--border);border-radius:8px;padding:.6rem;width:220px;flex:0 0 auto;transition:opacity .15s}
+  .lane-card.dragging{opacity:.35}
+  .lane-card.drag-over-left{box-shadow:inset 3px 0 0 0 var(--accent)}
+  .lane-card.drag-over-right{box-shadow:inset -3px 0 0 0 var(--accent)}
+  .lane-card-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;font-size:.72rem;color:var(--muted)}
+  .lane-card-head-left{display:flex;align-items:center;gap:.35rem}
+  .lane-drag-handle{cursor:grab;font-size:.85rem;line-height:1;user-select:none}
+  .lane-drag-handle:active{cursor:grabbing}
+  .lane-card-actions button{padding:1px 5px;font-size:.68rem;margin-left:2px;line-height:1.4}
+  .lane-field{margin:.5rem 0}
+  .lane-field-label{display:block;font-size:.62rem;color:var(--muted);margin-bottom:2px;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  .lane-field select{width:100%;padding:.25rem .35rem;font-size:.78rem}
+  .turn-checks{display:grid;grid-template-columns:1fr;gap:2px 6px}
+  .turn-checks label{font-size:.7rem;gap:3px;margin:0;white-space:nowrap}
+  .add-lane-btn{width:52px;min-height:96px;border:1px dashed var(--border);background:none;border-radius:8px;font-size:1.2rem;color:var(--muted);align-self:stretch}
+  .add-lane-btn:hover{background:var(--panel);color:var(--text)}
+
+  #vizWrap{overflow-x:auto}
+  #viz{display:block}
+
+  /* paste-in panel */
+  summary{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;cursor:pointer;width:fit-content;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::before{content:"▸ "}
+  details[open]>summary::before{content:"▾ "}
+  details[open]>summary{margin-bottom:.8rem}
+  textarea{display:block;width:100%;min-height:104px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:.6rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.8rem;line-height:1.5;resize:vertical}
+  #pasteStatus{margin-top:.55rem;font-size:.8rem;display:grid;gap:.15rem}
+  #pasteStatus .warn{color:var(--warn)}
+  #pasteStatus .dim{color:var(--muted)}
+
+  /* left/right-of-road controls (parking) */
+  .side-row{display:flex;flex-wrap:wrap;gap:.4rem .7rem;align-items:center}
+  .side-row+.side-row{margin-top:.45rem}
+  .side-name{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;width:68px}
+  select:disabled{opacity:.45;cursor:not-allowed}
+</style>
+</head>
+<body>
+<header>
+  <h1>🛣️ Lane Tagger</h1>
+  <button id="darkmode" title="Toggle dark mode">🌙</button>
+</header>
+
+<main>
+  <section>
+    <details id="pasteDetails">
+      <summary title="Read existing tags back into the editor — paste from JOSM, iD, Overpass or this tool's own output">Paste tags</summary>
+      <textarea id="pasteInput" spellcheck="false" placeholder="Paste OSM tags — one key=value per line, e.g.&#10;lanes=3&#10;oneway=yes&#10;turn:lanes=left|through|through;right&#10;parking:both=lane"></textarea>
+      <div class="row" style="margin-top:.55rem">
+        <button id="loadBtn" class="primary">Load into editor</button>
+        <button id="pasteClearBtn">Clear</button>
+      </div>
+      <div id="pasteStatus"></div>
+    </details>
+  </section>
+
+  <section>
+    <div class="row">
+      <label>Direction
+        <select id="modeSelect">
+          <option value="oneway">One-way</option>
+          <option value="twoway">Two-way</option>
+        </select>
+      </label>
+      <label id="onewayTagWrap"><input type="checkbox" id="onewayTag"> <code>oneway=yes</code></label>
+      <span id="drivingSideWrap" title="Diagram only — doesn't change tags">
+        <select id="drivingSide">
+          <option value="right">Right-hand traffic</option>
+          <option value="left">Left-hand traffic</option>
+        </select>
+      </span>
+    </div>
+    <div class="row" id="contraflowRow" title="A cycle lane running against the one-way. It's tagged with the side-cycleway keys (cycleway:left/right), not with :lanes, and it isn't counted in lanes=*"></div>
+    <div class="row" id="laneDefaults" title="Pre-fills newly added lanes; Apply to all lanes also bulk-sets lanes that already exist"></div>
+  </section>
+
+  <section>
+    <h2 id="forwardLegend" title="Lane 1 = nearest the centerline (or the road's edge, in one-way mode); higher numbers move toward the outer curb. Whichever side ends up drawn left of the centerline below is mirrored to match, same as JOSM's lane view.">Lanes</h2>
+    <div class="lane-row" id="forwardLanes"></div>
+  </section>
+
+  <section id="backwardFieldset">
+    <h2>Backward</h2>
+    <div class="lane-row" id="backwardLanes"></div>
+  </section>
+
+  <section id="bothWaysFieldset">
+    <h2 title="A lane shared by both directions of traffic — e.g. a center two-way left-turn lane">Both-ways</h2>
+    <div class="lane-row" id="bothWaysLanes"></div>
+  </section>
+
+  <section>
+    <h2 title="Left and right are the way's own sides, looking along the ▲ forward direction. When both sides match, the tags collapse to the parking:both shorthand.">On-street parking</h2>
+    <div id="parkingRows"></div>
+  </section>
+
+  <section>
+    <h2>Diagram</h2>
+    <div id="vizWrap"><svg id="viz"></svg></div>
+  </section>
+
+  <section>
+    <h2>Tags</h2>
+    <pre id="output"></pre>
+    <button id="copyBtn" class="primary">Copy</button>
+  </section>
+</main>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- option tables ----------
+  var TURN_DEFS = [
+    ['sharp_left','⬉ Sharp left'],
+    ['left','⬅ Left'],
+    ['slight_left','↖ Slight left'],
+    ['through','⬆ Through'],
+    ['slight_right','↗ Slight right'],
+    ['right','➡ Right'],
+    ['sharp_right','⬈ Sharp right'],
+    ['merge_to_left','⇦ Merge left'],
+    ['merge_to_right','⇨ Merge right'],
+    ['reverse','↩ Reverse'],
+    ['none','⊘ None (no arrow)']
+  ];
+  var TURN_VALUES={};
+  TURN_DEFS.forEach(function(d){ TURN_VALUES[d[0]]=1; });
+  var BICYCLE_DEFS = [
+    ['','– unspecified –'],['yes','yes'],['designated','designated (bike lane)'],
+    ['no','no'],['permissive','permissive'],['dismount','dismount']
+  ];
+  var VEHICLE_DEFS = [
+    ['','– unspecified –'],['yes','yes'],['no','no'],['designated','designated'],
+    ['permissive','permissive'],['hov','hov (carpool)']
+  ];
+  var CYCLEWAY_DEFS = [
+    ['','– unspecified –'],['no','no'],['lane','lane (painted)'],
+    ['share_busway','share_busway'],['track','track (separated)']
+  ];
+  var BUS_DEFS = [
+    ['','– unspecified –'],['yes','yes'],['designated','designated (bus lane)'],
+    ['no','no'],['permissive','permissive']
+  ];
+  var TAG_KEY = {turn:'turn:lanes', bicycle:'bicycle:lanes', vehicle:'vehicle:lanes', cycleway:'cycleway:lanes', bus:'psv:lanes'};
+  var CATS = ['turn','bicycle','vehicle','cycleway','bus'];
+  var DEFS_BY_CAT = {bicycle:BICYCLE_DEFS, vehicle:VEHICLE_DEFS, cycleway:CYCLEWAY_DEFS, bus:BUS_DEFS};
+
+  // Contraflow cycling on a oneway street, per the wiki's M3a/M3b examples:
+  // oneway=yes + oneway:bicycle=no + cycleway:<side>=lane + cycleway:<side>:oneway=-1.
+  // "shared" is the no-infrastructure case (oneway:bicycle=no on its own), which also
+  // covers the deprecated cycleway=opposite.
+  var CONTRAFLOW_DEFS = [
+    ['lane','lane — painted contraflow lane'],
+    ['track','track — separated'],
+    ['shared','shared — no separate lane']
+  ];
+  var PARKING_DEFS = [
+    ['','– none / not set –'],
+    ['lane','lane — on the carriageway'],
+    ['street_side','street_side — bays beside it'],
+    ['half_on_kerb','half_on_kerb'],
+    ['on_kerb','on_kerb — on the footway'],
+    ['shoulder','shoulder'],
+    ['separate','separate — mapped separately'],
+    ['yes','yes — position unknown'],
+    ['no','no — no parking here']
+  ];
+  var ORIENTATION_DEFS = [
+    ['','– unspecified –'],['parallel','parallel'],['diagonal','diagonal'],['perpendicular','perpendicular']
+  ];
+  // Positions that describe vehicles actually standing beside the road — the only ones
+  // an :orientation applies to, and the only ones drawn as a band in the diagram.
+  var PARKING_PHYSICAL = {lane:1, street_side:1, half_on_kerb:1, on_kerb:1, shoulder:1, yes:1};
+
+  function defsHas(defs, v){
+    return defs.some(function(d){ return d[0]===v; });
+  }
+
+  // ---------- state ----------
+  function defaultLane(){ return {turns:new Set(), bicycle:'', vehicle:'', cycleway:'', bus:''}; }
+
+  var state = {
+    mode:'twoway',
+    drivingSide:'right',
+    onewayTag:true,
+    forward:[defaultLane()],
+    backward:[defaultLane()],
+    bothWays:[],
+    // Seeds newly-added lanes and, via "Apply to all lanes", bulk-sets existing
+    // ones too — set the common case once instead of re-picking it on every lane.
+    // Turn isn't included: it's quick enough to pick per-lane and rarely repeats.
+    laneDefault:{bicycle:'', vehicle:'', cycleway:'', bus:''},
+    contraflow:{on:false, side:'left', type:'lane'},
+    // Sides of the way, looking along the forward direction.
+    parking:{left:{type:'',orientation:''}, right:{type:'',orientation:''}}
+  };
+
+  function contraflowActive(){
+    // oneway:bicycle=no only says anything on a street that is actually tagged oneway.
+    return state.mode==='oneway' && state.onewayTag && state.contraflow.on;
+  }
+
+  function laneGroup(name){
+    if(name==='forward') return state.forward;
+    if(name==='backward') return state.backward;
+    return state.bothWays;
+  }
+
+  // ---------- lane editor ----------
+  // Drag-to-reorder: dragState tracks the array being reordered and the source
+  // index so drops are only accepted within the same lane group (forward stays
+  // forward, etc.), same as the ◀/▶ buttons already only move within their group.
+  var dragState=null;
+  function clearDragOverIndicators(){
+    Array.prototype.forEach.call(document.querySelectorAll('.lane-card.drag-over-left,.lane-card.drag-over-right'), function(c){
+      c.classList.remove('drag-over-left','drag-over-right');
+    });
+  }
+
+  function buildSelectField(labelText, defs, current, onChange){
+    var field=document.createElement('div'); field.className='lane-field';
+    var lbl=document.createElement('span'); lbl.className='lane-field-label'; lbl.textContent=labelText;
+    var sel=document.createElement('select');
+    defs.forEach(function(d){
+      var opt=document.createElement('option'); opt.value=d[0]; opt.textContent=d[1];
+      if(d[0]===current) opt.selected=true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', function(){ onChange(sel.value); });
+    field.appendChild(lbl); field.appendChild(sel);
+    return field;
+  }
+
+  function buildTurnField(turns, onChange){
+    var field=document.createElement('div'); field.className='lane-field';
+    var lbl=document.createElement('span'); lbl.className='lane-field-label'; lbl.textContent='Turn';
+    field.appendChild(lbl);
+    var grid=document.createElement('div'); grid.className='turn-checks';
+    TURN_DEFS.forEach(function(d){
+      var val=d[0], label=d[1];
+      var wrap=document.createElement('label');
+      var cb=document.createElement('input'); cb.type='checkbox'; cb.checked=turns.has(val);
+      cb.addEventListener('change', function(){
+        if(val==='none'){
+          if(cb.checked){ turns.clear(); turns.add('none'); }
+          else { turns.delete('none'); }
+        } else {
+          turns.delete('none');
+          if(cb.checked) turns.add(val); else turns.delete(val);
+        }
+        onChange();
+      });
+      wrap.appendChild(cb);
+      wrap.appendChild(document.createTextNode(' '+label));
+      grid.appendChild(wrap);
+    });
+    field.appendChild(grid);
+    return field;
+  }
+
+  function buildLaneFields(card, lane, onChange){
+    card.appendChild(buildTurnField(lane.turns, onChange));
+    card.appendChild(buildSelectField('Bicycle', BICYCLE_DEFS, lane.bicycle, function(v){ lane.bicycle=v; onChange(); }));
+    card.appendChild(buildSelectField('Vehicle', VEHICLE_DEFS, lane.vehicle, function(v){ lane.vehicle=v; onChange(); }));
+    card.appendChild(buildSelectField('Cycleway', CYCLEWAY_DEFS, lane.cycleway, function(v){ lane.cycleway=v; onChange(); }));
+    card.appendChild(buildSelectField('Bus', BUS_DEFS, lane.bus, function(v){ lane.bus=v; onChange(); }));
+  }
+
+  function buildLaneCard(lane, i, arr, minCount){
+    var card=document.createElement('div'); card.className='lane-card'; card.draggable=true;
+
+    var head=document.createElement('div'); head.className='lane-card-head';
+    var headLeft=document.createElement('div'); headLeft.className='lane-card-head-left';
+    var handle=document.createElement('span'); handle.className='lane-drag-handle'; handle.textContent='⠿'; handle.title='Drag to reorder';
+    var title=document.createElement('span'); title.textContent='Lane '+(i+1);
+    headLeft.appendChild(handle); headLeft.appendChild(title);
+    var actions=document.createElement('div'); actions.className='lane-card-actions';
+
+    var btnL=document.createElement('button'); btnL.type='button'; btnL.textContent='◀'; btnL.title='Move left';
+    btnL.disabled=(i===0);
+    btnL.addEventListener('click', function(){ var t=arr[i-1]; arr[i-1]=arr[i]; arr[i]=t; renderAll(); });
+
+    var btnR=document.createElement('button'); btnR.type='button'; btnR.textContent='▶'; btnR.title='Move right';
+    btnR.disabled=(i===arr.length-1);
+    btnR.addEventListener('click', function(){ var t=arr[i+1]; arr[i+1]=arr[i]; arr[i]=t; renderAll(); });
+
+    var btnX=document.createElement('button'); btnX.type='button'; btnX.textContent='✕'; btnX.title='Remove lane';
+    btnX.disabled=(arr.length<=minCount);
+    btnX.addEventListener('click', function(){ arr.splice(i,1); renderAll(); });
+
+    actions.appendChild(btnL); actions.appendChild(btnR); actions.appendChild(btnX);
+    head.appendChild(headLeft); head.appendChild(actions);
+    card.appendChild(head);
+
+    // Drag is only armed when the gesture starts on the grip handle, so dragging
+    // the card doesn't fight with clicking selects/checkboxes or selecting label text.
+    var handleActive=false;
+    handle.addEventListener('mousedown', function(){ handleActive=true; });
+    card.addEventListener('mouseup', function(){ handleActive=false; });
+    card.addEventListener('dragstart', function(e){
+      if(!handleActive){ e.preventDefault(); return; }
+      handleActive=false;
+      dragState={arr:arr, index:i};
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('text/plain', String(i));
+      requestAnimationFrame(function(){ card.classList.add('dragging'); });
+    });
+    card.addEventListener('dragend', function(){
+      card.classList.remove('dragging');
+      clearDragOverIndicators();
+      dragState=null;
+    });
+    card.addEventListener('dragover', function(e){
+      if(!dragState || dragState.arr!==arr) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect='move';
+      var rect=card.getBoundingClientRect();
+      var isAfter=(e.clientX-rect.left) > rect.width/2;
+      clearDragOverIndicators();
+      card.classList.add(isAfter ? 'drag-over-right' : 'drag-over-left');
+    });
+    card.addEventListener('dragleave', function(e){
+      if(!card.contains(e.relatedTarget)) card.classList.remove('drag-over-left','drag-over-right');
+    });
+    card.addEventListener('drop', function(e){
+      if(!dragState || dragState.arr!==arr) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var rect=card.getBoundingClientRect();
+      var isAfter=(e.clientX-rect.left) > rect.width/2;
+      var fromIndex=dragState.index, toIndex=i+(isAfter?1:0);
+      var item=arr.splice(fromIndex,1)[0];
+      if(fromIndex<toIndex) toIndex--;
+      arr.splice(toIndex,0,item);
+      dragState=null;
+      renderAll();
+    });
+
+    buildLaneFields(card, lane, renderAll);
+
+    return card;
+  }
+
+  function renderLaneGroup(container, groupName, minCount){
+    minCount = minCount || 0;
+    var arr = laneGroup(groupName);
+    container.innerHTML='';
+    arr.forEach(function(lane, i){ container.appendChild(buildLaneCard(lane, i, arr, minCount)); });
+    var addBtn=document.createElement('button'); addBtn.type='button'; addBtn.className='add-lane-btn'; addBtn.textContent='+'; addBtn.title='Add lane';
+    addBtn.addEventListener('click', function(){
+      var lane=defaultLane();
+      lane.bicycle=state.laneDefault.bicycle;
+      lane.vehicle=state.laneDefault.vehicle;
+      lane.cycleway=state.laneDefault.cycleway;
+      lane.bus=state.laneDefault.bus;
+      arr.push(lane);
+      renderAll();
+    });
+    container.appendChild(addBtn);
+  }
+
+  // The one place a user sets the common case for bicycle/vehicle/cycleway/bus
+  // once, instead of re-picking it on every lane. Built once (not per-render):
+  // nothing else on the page needs to reflect these values changing, since they
+  // only take effect when a lane is added or "Apply to all lanes" is clicked.
+  function buildLaneDefaultsRow(container){
+    var def = state.laneDefault;
+    function field(labelText, defs, key){
+      var lbl=document.createElement('label');
+      lbl.appendChild(document.createTextNode(labelText+' '));
+      var sel=document.createElement('select');
+      defs.forEach(function(d){
+        var opt=document.createElement('option'); opt.value=d[0]; opt.textContent=d[1];
+        if(d[0]===def[key]) opt.selected=true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', function(){ def[key]=sel.value; });
+      lbl.appendChild(sel);
+      container.appendChild(lbl);
+    }
+    field('Bicycle', BICYCLE_DEFS, 'bicycle');
+    field('Vehicle', VEHICLE_DEFS, 'vehicle');
+    field('Cycleway', CYCLEWAY_DEFS, 'cycleway');
+    field('Bus', BUS_DEFS, 'bus');
+
+    var applyBtn=document.createElement('button'); applyBtn.type='button'; applyBtn.textContent='Apply to all lanes';
+    applyBtn.title="Set every lane's bicycle/vehicle/cycleway/bus to these defaults (turn selections are left alone)";
+    applyBtn.addEventListener('click', function(){
+      [state.forward, state.backward, state.bothWays].forEach(function(arr){
+        arr.forEach(function(l){
+          l.bicycle=def.bicycle; l.vehicle=def.vehicle; l.cycleway=def.cycleway; l.bus=def.bus;
+        });
+      });
+      renderAll();
+    });
+    container.appendChild(applyBtn);
+  }
+
+  // Built once, like the lane defaults: these controls hold their own state and only
+  // need re-syncing when a paste replaces the whole model (updateControlsFromState).
+  var contraflowEls=null, parkingEls=null;
+
+  function buildContraflowRow(container){
+    var cf=state.contraflow;
+    var lbl=document.createElement('label');
+    var chk=document.createElement('input'); chk.type='checkbox';
+    lbl.appendChild(chk);
+    lbl.appendChild(document.createTextNode(' Contraflow cycling'));
+    container.appendChild(lbl);
+
+    function sel(defs, key, title){
+      var s=document.createElement('select');
+      s.title=title;
+      defs.forEach(function(d){
+        var o=document.createElement('option'); o.value=d[0]; o.textContent=d[1];
+        s.appendChild(o);
+      });
+      s.addEventListener('change', function(){ cf[key]=s.value; renderAll(); });
+      container.appendChild(s);
+      return s;
+    }
+    var side=sel([['left','on the left side'],['right','on the right side']], 'side',
+      'Which side of the way the contraflow cyclists use (left/right of the ▲ forward direction)');
+    var type=sel(CONTRAFLOW_DEFS, 'type', 'What the contraflow direction gets: a painted lane, a separated track, or just shared carriageway');
+
+    chk.addEventListener('change', function(){ cf.on=chk.checked; renderAll(); });
+    return {chk:chk, side:side, type:type};
+  }
+
+  function buildParkingRows(container){
+    var els={};
+    ['left','right'].forEach(function(sideName){
+      var p=state.parking[sideName];
+      var row=document.createElement('div'); row.className='side-row';
+      var name=document.createElement('span'); name.className='side-name';
+      name.textContent=sideName==='left' ? 'Left' : 'Right';
+      row.appendChild(name);
+
+      function sel(defs, key){
+        var s=document.createElement('select');
+        defs.forEach(function(d){
+          var o=document.createElement('option'); o.value=d[0]; o.textContent=d[1];
+          s.appendChild(o);
+        });
+        s.addEventListener('change', function(){ p[key]=s.value; renderAll(); });
+        row.appendChild(s);
+        return s;
+      }
+      var type=sel(PARKING_DEFS,'type');
+      type.title='parking:'+sideName+'=* — where vehicles stand relative to the carriageway';
+      var orient=sel(ORIENTATION_DEFS,'orientation');
+      orient.title='parking:'+sideName+':orientation=* — how vehicles are angled to the street';
+
+      container.appendChild(row);
+      els[sideName]={type:type, orient:orient};
+    });
+    return els;
+  }
+
+  // Catches drops on the empty space/add-button past the last card, appending
+  // the dragged lane at the end of its group. Card-level drop handlers
+  // stopPropagation() when they handle a drop, so this only fires otherwise.
+  // Wired once per container (not per render) since the container element
+  // itself persists across renderAll() calls.
+  function wireLaneRowDrop(container, groupName){
+    container.addEventListener('dragover', function(e){
+      if(!dragState || dragState.arr!==laneGroup(groupName)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect='move';
+    });
+    container.addEventListener('drop', function(e){
+      var arr=laneGroup(groupName);
+      if(!dragState || dragState.arr!==arr) return;
+      e.preventDefault();
+      var item=arr.splice(dragState.index,1)[0];
+      arr.push(item);
+      dragState=null;
+      clearDragOverIndicators();
+      renderAll();
+    });
+  }
+
+  // ---------- tag generation ----------
+  function turnValue(lane){
+    if(lane.turns.size===0) return '';
+    if(lane.turns.has('none')) return 'none';
+    var order = TURN_DEFS.map(function(d){return d[0];}).filter(function(v){return v!=='none';});
+    return order.filter(function(v){ return lane.turns.has(v); }).join(';');
+  }
+  function laneValue(lane, cat){
+    if(cat==='turn') return turnValue(lane);
+    return lane[cat] || '';
+  }
+  function buildTagValue(arr, cat){
+    var vals = arr.map(function(l){ return laneValue(l, cat); });
+    if(vals.every(function(v){ return v===''; })) return null;
+    return vals.join('|');
+  }
+  // lanes=* counts only lanes usable by general traffic — a lane marked vehicle=no
+  // (e.g. a bike-only lane) doesn't count.
+  function vehicleLaneCount(arr){
+    return arr.filter(function(l){ return l.vehicle!=='no'; }).length;
+  }
+  function contraflowTags(){
+    var cf=state.contraflow, out=[];
+    if(!contraflowActive()) return out;
+    out.push(['oneway:bicycle','no']);
+    if(cf.type!=='shared'){
+      out.push(['cycleway:'+cf.side, cf.type]);
+      // Without this the side cycleway would be read as running with the oneway.
+      out.push(['cycleway:'+cf.side+':oneway','-1']);
+    }
+    return out;
+  }
+  function parkingSideTags(side, p){
+    var out=[];
+    if(!p.type) return out;
+    out.push(['parking:'+side, p.type]);
+    if(p.orientation && PARKING_PHYSICAL[p.type]) out.push(['parking:'+side+':orientation', p.orientation]);
+    return out;
+  }
+  function parkingTags(){
+    var L=state.parking.left, R=state.parking.right;
+    // :both is the documented shorthand for two identical sides.
+    if(L.type && L.type===R.type && L.orientation===R.orientation) return parkingSideTags('both', L);
+    return parkingSideTags('left',L).concat(parkingSideTags('right',R));
+  }
+  function buildTags(){
+    var tags=[];
+    if(state.mode==='oneway'){
+      tags.push(['lanes', String(vehicleLaneCount(state.forward))]);
+      if(state.onewayTag) tags.push(['oneway','yes']);
+      CATS.forEach(function(cat){
+        var val = buildTagValue(state.forward, cat);
+        if(val!==null) tags.push([TAG_KEY[cat], val]);
+      });
+    } else {
+      var f=vehicleLaneCount(state.forward), b=vehicleLaneCount(state.backward), bw=vehicleLaneCount(state.bothWays);
+      tags.push(['lanes', String(f+b+bw)]);
+      // A both-ways lane makes an even lanes= count ambiguous (it's no longer a plain
+      // 50/50 forward/backward split), so spell out the split whenever one exists.
+      if(f!==b || bw>0){
+        tags.push(['lanes:forward', String(f)]);
+        tags.push(['lanes:backward', String(b)]);
+      }
+      if(bw>0) tags.push(['lanes:both_ways', String(bw)]);
+      CATS.forEach(function(cat){
+        var vf = buildTagValue(state.forward, cat);
+        var vb = buildTagValue(state.backward, cat);
+        var vbw = buildTagValue(state.bothWays, cat);
+        if(vf!==null) tags.push([TAG_KEY[cat]+':forward', vf]);
+        if(vb!==null) tags.push([TAG_KEY[cat]+':backward', vb]);
+        if(vbw!==null) tags.push([TAG_KEY[cat]+':both_ways', vbw]);
+      });
+    }
+    // Neither of these is part of the :lanes sequence or the lanes=* count.
+    return tags.concat(contraflowTags(), parkingTags());
+  }
+  function renderOutput(){
+    var tags = buildTags();
+    document.getElementById('output').textContent = tags.map(function(t){ return t[0]+'='+t[1]; }).join('\n');
+  }
+
+  // ---------- visualizer ----------
+  var NS='http://www.w3.org/2000/svg';
+  function el(tag, attrs){
+    var e=document.createElementNS(NS, tag);
+    for(var k in attrs){ e.setAttribute(k, attrs[k]); }
+    return e;
+  }
+  function text(x,y,anchor,style,str){
+    var t=el('text',{x:x,y:y,'text-anchor':anchor,style:style});
+    t.appendChild(document.createTextNode(str));
+    return t;
+  }
+
+  var LANE_W=58, ROAD_H=250, TOPPAD=34, BOTPAD=34, SIDEPAD=20, CENTER_W=16;
+  var ARROW_W=40, ARROW_H=90;
+  var PARK_W_PARALLEL=26, PARK_W_ANGLE=42, CF_BUFFER=8;
+  var CAP='font-size:11px;fill:var(--viz-caption);font-weight:bold';
+
+  // Badge icons: single-path glyphs, viewBox 0 0 15 15.
+  // Turn icons: Tabler Icons (MIT), via commons.wikimedia.org/wiki/Category:Tabler-Icons, viewBox 0 0 24 24.
+  var ICON_VIEWBOX = {bicycle:'0 0 15 15', car:'0 0 15 15', bus:'0 0 15 15'};
+  var ICON_PATHS = {
+    bicycle: ['M7.5 2c-0.68 -0.01 -0.68 1.01 0 1H9v1.27l-2.8 2.33L5.22 4H5.5c0.68 0.01 0.68 -1.01 0 -1h-2c-0.68 -0.01 -0.68 1.01 0 1h0.65L5.04 6.38C4.58 6.14 4.06 6 3.5 6C1.57 6 0 7.57 0 9.5S1.57 13 3.5 13S7 11.43 7 9.5c0 -0.67 -0.2 -1.29 -0.53 -1.82L9.29 5.33l0.46 1.16C8.71 7.09 8 8.21 8 9.5c0 1.93 1.57 3.5 3.5 3.5S15 11.43 15 9.5S13.43 6 11.5 6c-0.28 0 -0.55 0.04 -0.82 0.11L10 4.4V2.5c0 -0.28 -0.22 -0.5 -0.5 -0.5H7.5zM3.5 7c0.59 0 1.13 0.21 1.55 0.55l-1.87 1.56c-0.51 0.43 0.13 1.19 0.64 0.77l1.88 -1.56C5.88 8.67 6 9.07 6 9.5C6 10.89 4.89 12 3.5 12S1 10.89 1 9.5S2.11 7 3.5 7L3.5 7zM11.5 7C12.89 7 14 8.11 14 9.5S12.89 12 11.5 12S9 10.89 9 9.5c0 -0.88 0.45 -1.64 1.13 -2.09l0.91 2.27c0.25 0.62 1.18 0.25 0.93 -0.37l-0.91 -2.27C11.2 7.02 11.35 7 11.5 7L11.5 7z'],
+    car: ['M4.62 2L10.38 2C10.76 2 11.11 2.21 11.28 2.55L13 6C13.55 6 14 6.45 14 7L14 11.5L13 11.5L13 12.5C13 13.05 12.55 13.5 12 13.5L11 13.5C10.45 13.5 10 13.05 10 12.5L10 11.5L5 11.5L5 12.5C5 13.05 4.55 13.5 4 13.5L3 13.5C2.45 13.5 2 13.05 2 12.5L2 11.5L1 11.5L1 7C1 6.45 1.45 6 2 6L3.72 2.55C3.89 2.21 4.24 2 4.62 2ZM4.25 7.5C3.56 7.5 3 8.06 3 8.75C3 9.44 3.56 10 4.25 10C4.94 10 5.5 9.44 5.5 8.75C5.5 8.06 4.94 7.5 4.25 7.5ZM10.75 7.5C10.06 7.5 9.5 8.06 9.5 8.75C9.5 9.44 10.06 10 10.75 10C11.44 10 12 9.44 12 8.75C12 8.06 11.44 7.5 10.75 7.5ZM10.25 3.5L4.75 3.5L3.5 6L11.5 6L10.25 3.5Z'],
+    bus: ['M2 3C2 1.9 2.9 1 4 1L11 1C12.1 1 13 1.9 13 3L13 11C13 12 12 12 12 12L12 13C12 13 12 14 11 14C10 14 10 13 10 13L10 12L5 12L5 13C5 13 5 14 4 14C3 14 3 13 3 13L3 12C2 12 2 11 2 11L2 7.2L2 3ZM3.5 2.5C3.22 2.5 3 2.72 3 3L3 7C3 7.28 3.22 7.5 3.5 7.5L11.5 7.5C11.78 7.5 12 7.28 12 7L12 3C12 2.72 11.78 2.5 11.5 2.5L3.5 2.5ZM4 9C3.45 9 3 9.45 3 10C3 10.55 3.45 11 4 11C4.55 11 5 10.55 5 10C5 9.45 4.55 9 4 9ZM11 9C10.45 9 10 9.45 10 10C10 10.55 10.45 11 11 11C11.55 11 12 10.55 12 10C12 9.45 11.55 9 11 9Z'],
+    'arrow-up': ['M12 5l0 14', 'M18 11l-6 -6', 'M6 11l6 -6'],
+    'arrow-up-left': ['M7 7l10 10', 'M16 7l-9 0l0 9'],
+    'arrow-up-right': ['M17 7l-10 10', 'M8 7l9 0l0 9'],
+    'corner-up-left': ['M18 18v-6a3 3 0 0 0 -3 -3h-10l4 -4m0 8l-4 -4'],
+    'corner-up-right': ['M6 18v-6a3 3 0 0 1 3 -3h10l-4 -4m0 8l4 -4'],
+    'arrow-left': ['M5 12l14 0', 'M5 12l6 6', 'M5 12l6 -6'],
+    'arrow-right': ['M5 12l14 0', 'M13 18l6 -6', 'M13 6l6 6'],
+    'arrow-back-up': ['M9 14l-4 -4l4 -4', 'M5 10h11a4 4 0 1 1 0 8h-1']
+  };
+  var ICON_BADGE_COLORS = {
+    no:'#c0524f', designated:'#3f9a56', lane:'#3f9a56', track:'#3f9a56',
+    hov:'#c9862f', share_busway:'#c9862f'
+  };
+  function iconBadgeColor(type, value){
+    // A designated bus lane reads amber (matching the bus-lane fill), not the
+    // green used for designated bike facilities.
+    if(type==='bus' && value==='designated') return '#c9862f';
+    return ICON_BADGE_COLORS[value] || '#8a8f98';
+  }
+
+  function drawIconBadge(svg, type, value, cx, cy){
+    svg.appendChild(el('circle',{cx:cx,cy:cy,r:9,style:'fill:'+iconBadgeColor(type,value)}));
+    svg.appendChild(el('use',{href:'#icon-'+type,x:cx-6,y:cy-6,width:12,height:12,style:'fill:#fff'}));
+    if(value==='no'){
+      svg.appendChild(el('line',{x1:cx-6.5,y1:cy+6.5,x2:cx+6.5,y2:cy-6.5,style:'stroke:#fff;stroke-width:1.5'}));
+    }
+  }
+
+  // Icon per turn value, chosen so slight/normal/sharp read as increasingly tight bends.
+  var TURN_ICON = {
+    through:'arrow-up',
+    left:'corner-up-left', slight_left:'arrow-up-left', sharp_left:'arrow-left',
+    right:'corner-up-right', slight_right:'arrow-up-right', sharp_right:'arrow-right',
+    reverse:'arrow-back-up'
+  };
+  function pickIcon(turns, keysInPriorityOrder){
+    for(var i=0;i<keysInPriorityOrder.length;i++){
+      if(turns.has(keysInPriorityOrder[i])) return TURN_ICON[keysInPriorityOrder[i]];
+    }
+    return null;
+  }
+
+  var ARROW_SLOT = {
+    solo:{x:10,y:35,s:20}, top:{x:12,y:8,s:16}, left:{x:0,y:37,s:16}, right:{x:24,y:37,s:16}, bottom:{x:12,y:66,s:16}
+  };
+
+  function buildArrow(turns, dir){
+    var g=el('g',{style:'fill:none;stroke:var(--viz-arrow);stroke-width:2;stroke-linecap:round;stroke-linejoin:round'});
+    if(!turns || turns.size===0 || turns.has('none')) return g;
+    var has=function(v){ return turns.has(v); };
+
+    var throughIcon = has('through') ? 'arrow-up' : null;
+    var leftIcon = pickIcon(turns, ['sharp_left','left','slight_left']);
+    var rightIcon = pickIcon(turns, ['sharp_right','right','slight_right']);
+    var reverseIcon = has('reverse') ? 'arrow-back-up' : null;
+    // Reuse the shallow diagonal for merges (dashed, to read as "merge" rather than "turn").
+    var leftDashed = false, rightDashed = false;
+    if(!leftIcon && has('merge_to_left')){ leftIcon='arrow-up-left'; leftDashed=true; }
+    if(!rightIcon && has('merge_to_right')){ rightIcon='arrow-up-right'; rightDashed=true; }
+
+    var slots=[];
+    if(throughIcon) slots.push({icon:throughIcon,pos:'top'});
+    if(leftIcon) slots.push({icon:leftIcon,pos:'left',dashed:leftDashed});
+    if(rightIcon) slots.push({icon:rightIcon,pos:'right',dashed:rightDashed});
+    if(reverseIcon) slots.push({icon:reverseIcon,pos:'bottom'});
+
+    slots.forEach(function(slot){
+      var p = slots.length===1 ? ARROW_SLOT.solo : ARROW_SLOT[slot.pos];
+      var use = el('use',{href:'#icon-'+slot.icon, x:p.x, y:p.y, width:p.s, height:p.s});
+      if(slot.dashed) use.setAttribute('style','stroke-dasharray:3,3');
+      g.appendChild(use);
+    });
+
+    if(dir==='down'){
+      // 180deg rotation (not just a vertical flip): a backward-direction driver
+      // is facing the opposite way, so their left/right are mirrored too, not just
+      // their direction of travel.
+      g.setAttribute('transform','rotate(180,20,45)');
+    }
+    return g;
+  }
+
+  function drawLane(svg, lane, x, y, w, h, dir, isLastInBlock){
+    var fill='var(--asphalt)', hatch=false;
+    // Only an actual painted/marked cycleway (cycleway:lanes) tints the surface green —
+    // bicycle:lanes=designated is an access tag, not a physical road marking. A designated
+    // bus lane is checked before the generic vehicle=no hatch since a real bus lane usually
+    // has both set (buses only) and the bus tint is the more informative of the two.
+    if(lane.cycleway && lane.cycleway!=='no'){ fill='var(--bike-lane)'; }
+    else if(lane.bus==='designated'){ fill='var(--bus-lane)'; }
+    else if(lane.vehicle==='no'){ hatch=true; }
+
+    svg.appendChild(el('rect',{x:x,y:y,width:w,height:h,style:'fill:'+(hatch?'url(#hatch)':fill)}));
+
+    if(!isLastInBlock){
+      svg.appendChild(el('line',{x1:x+w,y1:y,x2:x+w,y2:y+h,style:'stroke:var(--lane-line);stroke-width:1;stroke-dasharray:8,8'}));
+    }
+
+    var wrapG = el('g',{transform:'translate('+(x+w/2-ARROW_W/2)+','+(y+(h-ARROW_H)/2)+')'});
+    wrapG.appendChild(buildArrow(lane.turns, dir));
+    svg.appendChild(wrapG);
+
+    var icons=[];
+    if(lane.bicycle) icons.push(['bicycle', lane.bicycle]);
+    if(lane.cycleway && lane.cycleway!=='no') icons.push(['bicycle', lane.cycleway]);
+    if(lane.vehicle) icons.push(['car', lane.vehicle]);
+    if(lane.bus) icons.push(['bus', lane.bus]);
+    var iy = y+h-14;
+    icons.forEach(function(ic){
+      drawIconBadge(svg, ic[0], ic[1], x+w/2, iy);
+      iy -= 20;
+    });
+  }
+
+  function drawCenterline(svg,x,y,w,h){
+    var midx=x+w/2;
+    svg.appendChild(el('line',{x1:midx-2,y1:y,x2:midx-2,y2:y+h,style:'stroke:var(--center-yellow);stroke-width:2;stroke-dasharray:14,10'}));
+    svg.appendChild(el('line',{x1:midx+2,y1:y,x2:midx+2,y2:y+h,style:'stroke:var(--center-yellow);stroke-width:2'}));
+  }
+
+  function drawBothWaysLane(svg, lane, x, y, w, h){
+    svg.appendChild(el('rect',{x:x,y:y,width:w,height:h,style:'fill:var(--bothways-fill)'}));
+    // Bounded by turn-lane-style dashed yellow markings on both sides, not a plain divider.
+    svg.appendChild(el('line',{x1:x,y1:y,x2:x,y2:y+h,style:'stroke:var(--center-yellow);stroke-width:2;stroke-dasharray:14,10'}));
+    svg.appendChild(el('line',{x1:x+w,y1:y,x2:x+w,y2:y+h,style:'stroke:var(--center-yellow);stroke-width:2;stroke-dasharray:14,10'}));
+
+    // Usable from either direction, so show the same turn value rendered both ways.
+    var upG = el('g',{transform:'translate('+(x+w/2-ARROW_W/2)+','+(y+14)+')'});
+    upG.appendChild(buildArrow(lane.turns,'up'));
+    svg.appendChild(upG);
+    var downG = el('g',{transform:'translate('+(x+w/2-ARROW_W/2)+','+(y+h-14-ARROW_H)+')'});
+    downG.appendChild(buildArrow(lane.turns,'down'));
+    svg.appendChild(downG);
+  }
+
+  // Parked cars, drawn from above: parallel bays run along the road, the other two
+  // across it, so the band has to be wider for those.
+  var CAR_SHAPE = {
+    parallel:{len:32,wid:15,step:44,angle:0},
+    perpendicular:{len:34,wid:15,step:21,angle:0},
+    diagonal:{len:30,wid:15,step:34,angle:35}
+  };
+  function parkBandW(p){
+    if(!p.type || !PARKING_PHYSICAL[p.type]) return 0;
+    return (p.orientation==='perpendicular'||p.orientation==='diagonal') ? PARK_W_ANGLE : PARK_W_PARALLEL;
+  }
+  function drawParkingBand(svg, p, side, x, y, w, h){
+    var g=el('g',{});
+    var tip=el('title',{});
+    tip.appendChild(document.createTextNode('parking:'+side+'='+p.type+(p.orientation?'  ·  '+p.orientation:'')));
+    g.appendChild(tip);
+    g.appendChild(el('rect',{x:x,y:y,width:w,height:h,style:'fill:var(--parking-band)'}));
+
+    // Kerb along the outer edge, so the band reads as the edge of the street.
+    var kerbX = side==='left' ? x+1 : x+w-1;
+    g.appendChild(el('line',{x1:kerbX,y1:y,x2:kerbX,y2:y+h,style:'stroke:var(--kerb);stroke-width:2'}));
+
+    var shape = CAR_SHAPE[p.orientation] || CAR_SHAPE.parallel;
+    var along = (shape===CAR_SHAPE.parallel);
+    var rw = along ? shape.wid : shape.len, rh = along ? shape.len : shape.wid;
+    // Angled bays are entered from the adjacent traffic, so which way they lean
+    // follows the side of the road people drive on.
+    var angle = shape.angle && (state.drivingSide==='left' ? shape.angle : -shape.angle);
+    var top=y+26, avail=(y+h-6)-top;
+    var n=Math.max(1, Math.floor(avail/shape.step));
+    var start=top+(avail-n*shape.step)/2+shape.step/2;
+    for(var i=0;i<n;i++){
+      var cy=start+i*shape.step, cx=x+w/2;
+      var car=el('rect',{x:cx-rw/2,y:cy-rh/2,width:rw,height:rh,rx:3,style:'fill:var(--parking-car)'});
+      if(angle) car.setAttribute('transform','rotate('+angle+','+cx+','+cy+')');
+      g.appendChild(car);
+    }
+
+    g.appendChild(el('circle',{cx:x+w/2,cy:y+14,r:8.5,style:'fill:rgba(0,0,0,.32)'}));
+    g.appendChild(text(x+w/2, y+18, 'middle', CAP, 'P'));
+    svg.appendChild(g);
+  }
+
+  // Bike symbol over a down arrow, the way a contraflow lane is actually painted.
+  function drawContraflowMarker(svg, cx, cy){
+    svg.appendChild(el('use',{href:'#icon-bicycle',x:cx-11,y:cy-25,width:22,height:22,style:'fill:var(--viz-arrow)'}));
+    var g=el('g',{style:'fill:none;stroke:var(--viz-arrow);stroke-width:2;stroke-linecap:round;stroke-linejoin:round',
+      transform:'rotate(180,'+cx+','+(cy+14)+')'});
+    g.appendChild(el('use',{href:'#icon-arrow-up',x:cx-10,y:cy+4,width:20,height:20}));
+    svg.appendChild(g);
+  }
+  function drawContraflowStrip(svg, cf, x, y, w, h){
+    var g=el('g',{});
+    var tip=el('title',{});
+    tip.appendChild(document.createTextNode('cycleway:'+cf.side+'='+cf.type+'  ·  cycleway:'+cf.side+':oneway=-1'));
+    g.appendChild(tip);
+    g.appendChild(el('rect',{x:x,y:y,width:w,height:h,style:'fill:var(--bike-lane)'}));
+    if(cf.type==='lane'){
+      // Painted lane: part of the carriageway, divided from traffic by a solid line.
+      var inner = cf.side==='left' ? x+w : x;
+      g.appendChild(el('line',{x1:inner,y1:y,x2:inner,y2:y+h,style:'stroke:var(--lane-line);stroke-width:2'}));
+    } else {
+      // Track: physically its own thing, so give it its own kerbs.
+      g.appendChild(el('rect',{x:x+0.75,y:y,width:w-1.5,height:h,style:'fill:none;stroke:var(--kerb);stroke-width:1.5'}));
+    }
+    svg.appendChild(g);
+    drawContraflowMarker(svg, x+w/2, y+h/2);
+  }
+
+  function renderViz(){
+    var svg=document.getElementById('viz');
+    while(svg.firstChild) svg.removeChild(svg.firstChild);
+
+    var twoway = state.mode==='twoway';
+    var fArr=state.forward, bArr= twoway ? state.backward : [];
+    var bwArr = twoway ? state.bothWays : [];
+    var fCount=fArr.length, bCount=bArr.length, bwCount=bwArr.length;
+    var centerGapW = bwCount>0 ? bwCount*LANE_W : CENTER_W;
+
+    // Parking and contraflow sides are the way's own left/right, which is also screen
+    // left/right: this is a top-down view with forward pointing up, so unlike the lane
+    // order inside each direction block they never need mirroring.
+    var cf=state.contraflow, cfOn=contraflowActive();
+    var cfStrip = cfOn && cf.type!=='shared';
+    var cfBuf = (cfStrip && cf.type==='track') ? CF_BUFFER : 0;
+    var cfW = cfStrip ? LANE_W+cfBuf : 0;
+    var cfLeft = cfStrip && cf.side==='left', cfRight = cfStrip && cf.side==='right';
+    var plW=parkBandW(state.parking.left), prW=parkBandW(state.parking.right);
+
+    var laneAreaW = fCount*LANE_W + (twoway ? bCount*LANE_W+centerGapW : 0);
+    var laneX = SIDEPAD + plW + (cfLeft?cfW:0);
+    var width = laneX + laneAreaW + (cfRight?cfW:0) + prW + SIDEPAD;
+    var height = TOPPAD+ROAD_H+BOTPAD;
+    svg.setAttribute('viewBox','0 0 '+width+' '+height);
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+
+    var defs=el('defs',{});
+    var pattern=el('pattern',{id:'hatch',width:8,height:8,patternUnits:'userSpaceOnUse',patternTransform:'rotate(45)'});
+    pattern.appendChild(el('rect',{width:8,height:8,style:'fill:var(--asphalt)'}));
+    pattern.appendChild(el('line',{x1:0,y1:0,x2:0,y2:8,style:'stroke:var(--restricted);stroke-width:4'}));
+    defs.appendChild(pattern);
+    Object.keys(ICON_PATHS).forEach(function(name){
+      var sym=el('symbol',{id:'icon-'+name,viewBox:ICON_VIEWBOX[name]||'0 0 24 24'});
+      ICON_PATHS[name].forEach(function(d){ sym.appendChild(el('path',{d:d})); });
+      defs.appendChild(sym);
+    });
+    svg.appendChild(defs);
+
+    var fBlockX,bBlockX,centerX;
+    if(!twoway){
+      fBlockX=laneX;
+    } else if(state.drivingSide==='right'){
+      bBlockX=laneX;
+      centerX=laneX+bCount*LANE_W;
+      fBlockX=centerX+centerGapW;
+    } else {
+      fBlockX=laneX;
+      centerX=laneX+fCount*LANE_W;
+      bBlockX=centerX+centerGapW;
+    }
+
+    if(plW) drawParkingBand(svg, state.parking.left, 'left', SIDEPAD, TOPPAD, plW, ROAD_H);
+    if(prW) drawParkingBand(svg, state.parking.right, 'right', width-SIDEPAD-prW, TOPPAD, prW, ROAD_H);
+    var cfStripX = cfLeft ? SIDEPAD+plW : laneX+laneAreaW+cfBuf;
+    if(cfStrip) drawContraflowStrip(svg, cf, cfStripX, TOPPAD, LANE_W, ROAD_H);
+
+    // OSM lane order (index 0 = the lane nearest the centerline, i.e. the passing lane;
+    // higher indices move toward the outer curb) is fixed by the tag text and doesn't
+    // change with driving side. Whichever direction block ends up drawn on the LEFT of
+    // the centerline therefore needs to be drawn in reverse array order so index 0 still
+    // lands next to the centerline on screen. This matches how JOSM's lane view reads
+    // the same :forward/:backward tags.
+    var fMirrored = twoway && state.drivingSide!=='right';
+    var bMirrored = twoway && state.drivingSide==='right';
+    var fDraw = fMirrored ? fArr.slice().reverse() : fArr;
+    var bDraw = bMirrored ? bArr.slice().reverse() : bArr;
+
+    fDraw.forEach(function(lane,i){
+      drawLane(svg, lane, fBlockX+i*LANE_W, TOPPAD, LANE_W, ROAD_H, 'up', i===fDraw.length-1);
+    });
+    if(twoway){
+      bDraw.forEach(function(lane,i){
+        drawLane(svg, lane, bBlockX+i*LANE_W, TOPPAD, LANE_W, ROAD_H, 'down', i===bDraw.length-1);
+      });
+      if(bwCount>0){
+        bwArr.forEach(function(lane,i){
+          drawBothWaysLane(svg, lane, centerX+i*LANE_W, TOPPAD, LANE_W, ROAD_H);
+        });
+      } else {
+        drawCenterline(svg, centerX, TOPPAD, CENTER_W, ROAD_H);
+      }
+    }
+
+    // A painted contraflow lane sits inside the carriageway edge; a track sits outside it.
+    var edgeL = laneX - (cfLeft && cf.type==='lane' ? LANE_W : 0);
+    var edgeR = laneX + laneAreaW + (cfRight && cf.type==='lane' ? LANE_W : 0);
+    svg.appendChild(el('line',{x1:edgeL,y1:TOPPAD,x2:edgeL,y2:TOPPAD+ROAD_H,style:'stroke:var(--lane-line);stroke-width:2'}));
+    svg.appendChild(el('line',{x1:edgeR,y1:TOPPAD,x2:edgeR,y2:TOPPAD+ROAD_H,style:'stroke:var(--lane-line);stroke-width:2'}));
+
+    var fLabel = twoway ? '▲ forward' : '▲ direction of travel';
+    svg.appendChild(text(fBlockX+fCount*LANE_W/2, TOPPAD-12, 'middle', CAP, fLabel));
+    if(twoway){
+      svg.appendChild(text(bBlockX+bCount*LANE_W/2, TOPPAD+ROAD_H+20, 'middle', CAP, '▼ backward'));
+      if(bwCount>0){
+        svg.appendChild(text(centerX+bwCount*LANE_W/2, TOPPAD-12, 'middle', CAP, '↕ both ways'));
+      }
+    }
+    // Contraflow only exists in one-way mode, so the bottom caption row is free here.
+    if(cfOn){
+      var cfX = cfStrip ? cfStripX+LANE_W/2
+        : (cf.side==='left' ? laneX+LANE_W/2 : laneX+laneAreaW-LANE_W/2);
+      if(!cfStrip) drawContraflowMarker(svg, cfX, TOPPAD+42);
+      svg.appendChild(text(cfX, TOPPAD+ROAD_H+20, 'middle', CAP, '▼ contraflow'));
+    }
+  }
+
+  // ---------- reading tags back in ----------
+  var MAX_LANES=16;
+
+  function unquote(s){
+    s=s.trim();
+    if(s.length>1 && ((s.charAt(0)==='"'&&s.slice(-1)==='"')||(s.charAt(0)==="'"&&s.slice(-1)==="'"))) s=s.slice(1,-1);
+    return s.trim();
+  }
+  function intOr(v, dflt){
+    if(v===null||v==='') return dflt;
+    var n=parseInt(v,10);
+    return (isNaN(n)||n<0) ? dflt : n;
+  }
+  function makeLanes(n){
+    var a=[]; for(var i=0;i<n;i++) a.push(defaultLane()); return a;
+  }
+
+  // Takes what people actually have on the clipboard: key=value lines (this tool's own
+  // output, JOSM's tag table, iD's text editor), tab-separated pairs, or raw OSM XML.
+  function splitTagText(txt){
+    var pairs=[], junk=[], m;
+    if(/<tag\s/i.test(txt)){
+      var re=/<tag\s+k=(?:"([^"]*)"|'([^']*)')\s+v=(?:"([^"]*)"|'([^']*)')/gi;
+      while((m=re.exec(txt))) pairs.push([m[1]||m[2]||'', m[3]||m[4]||'']);
+      return {pairs:pairs, junk:junk};
+    }
+    txt.split(/\r?\n/).forEach(function(raw){
+      var line=raw.trim();
+      if(!line || line.charAt(0)==='#') return;
+      // Whichever separator comes first wins, so a value containing '=' or a tab
+      // doesn't get chopped in the wrong place.
+      var ti=line.indexOf('\t'), ei=line.indexOf('=');
+      var at = ti<0 ? ei : (ei<0 ? ti : Math.min(ti,ei));
+      if(at<1){ junk.push(line); return; }
+      pairs.push([unquote(line.slice(0,at)), unquote(line.slice(at+1))]);
+    });
+    return {pairs:pairs, junk:junk};
+  }
+
+  function loadFromText(txt){
+    var parsed=splitTagText(txt), warns=[], notes=[];
+    if(!parsed.pairs.length){
+      return {ok:false, count:0, notes:notes, ignored:[], junk:parsed.junk,
+        warns:['Nothing to read — paste tags as key=value, one per line.']};
+    }
+    var seen={}, used={};
+    parsed.pairs.forEach(function(p){
+      var k=p[0].trim().toLowerCase();
+      if(k) seen[k]=p[1].trim();
+    });
+    function peek(k){ return (k in seen) ? seen[k] : null; }
+    function take(k){ if(!(k in seen)) return null; used[k]=1; return seen[k]; }
+    function warn(s){ if(warns.indexOf(s)<0) warns.push(s); }
+    function note(s){ if(notes.indexOf(s)<0) notes.push(s); }
+    function laneKeys(cat, sfx){
+      // psv:lanes is what this tool writes; bus:lanes is the common alternative.
+      return cat==='bus' ? ['psv:lanes'+sfx,'bus:lanes'+sfx] : [TAG_KEY[cat]+sfx];
+    }
+
+    // --- direction ---
+    var onewayVal=take('oneway'), isOneway=false, onewayTag=false;
+    if(onewayVal!==null){
+      var ov=onewayVal.toLowerCase();
+      if(ov==='yes'||ov==='true'||ov==='1'){ isOneway=true; onewayTag=true; }
+      else if(ov==='-1'||ov==='reverse'){
+        isOneway=true; onewayTag=true;
+        warn('oneway=-1 read as one-way, but the output below says oneway=yes — put the -1 back if you copy it over.');
+      }
+      else if(ov!=='no') warn('Unrecognised oneway='+onewayVal+' — treated as two-way.');
+    }
+    var hasSuffixed=false;
+    Object.keys(seen).forEach(function(k){
+      if(/^(lanes|turn:lanes|bicycle:lanes|vehicle:lanes|cycleway:lanes|psv:lanes|bus:lanes):(forward|backward|both_ways)$/.test(k)) hasSuffixed=true;
+    });
+    if(onewayVal===null && !hasSuffixed){
+      var bare=CATS.some(function(cat){
+        return laneKeys(cat,'').some(function(k){ return peek(k)!==null; });
+      });
+      // A single left-to-right run of values only pins down one direction of travel.
+      if(bare){
+        isOneway=true;
+        warn('*:lanes tags with no direction suffix and no oneway tag — read as a single direction.');
+      }
+    }
+    state.mode = isOneway ? 'oneway' : 'twoway';
+    state.onewayTag = onewayTag;
+
+    // --- how many lanes ---
+    var tLanes=take('lanes'), tLF=take('lanes:forward'), tLB=take('lanes:backward'), tLBW=take('lanes:both_ways');
+    // On a one-way street both the bare and the :forward form describe the same lanes.
+    var fwdSuffixes = isOneway ? ['',':forward'] : [':forward'];
+
+    function countFor(suffixes){
+      var n=0, mismatch=false;
+      suffixes.forEach(function(sfx){
+        CATS.forEach(function(cat){
+          laneKeys(cat,sfx).forEach(function(k){
+            var v=peek(k);
+            if(v===null||v==='') return;
+            var c=v.split('|').length;
+            if(n && c!==n) mismatch=true;
+            n=Math.max(n,c);
+          });
+        });
+      });
+      if(mismatch) warn('*:lanes tags disagree on how many values there are — used the longest.');
+      return n;
+    }
+    function clamp(n){
+      if(n>MAX_LANES){ warn('Capped at '+MAX_LANES+' lanes per direction.'); return MAX_LANES; }
+      return n;
+    }
+
+    var fCount, bCount=0, bwCount=0;
+    if(isOneway){
+      // A pipe-separated run is authoritative: it counts cycle lanes that lanes=* leaves out.
+      fCount = countFor(fwdSuffixes) || intOr(tLanes,0) || 1;
+      if(tLBW!==null || countFor([':both_ways'])) warn('both_ways tags on a one-way street — ignored.');
+    } else {
+      fCount = countFor([':forward']) || intOr(tLF,0);
+      bCount = countFor([':backward']) || intOr(tLB,0);
+      bwCount = countFor([':both_ways']) || intOr(tLBW,0);
+      if(!fCount && !bCount){
+        var motor=Math.max(0, intOr(tLanes,0)-bwCount);
+        if(motor>=2){
+          fCount=Math.ceil(motor/2); bCount=motor-fCount;
+          if(motor%2) warn('lanes='+tLanes+' is odd with no lanes:forward/lanes:backward — split '+fCount+' forward / '+bCount+' backward.');
+        } else if(motor===1){
+          fCount=1; bCount=1;
+          warn('lanes=1 with no direction split — showing one lane each way.');
+        }
+      }
+    }
+    state.forward=makeLanes(clamp(fCount||1));
+    state.backward=makeLanes(isOneway ? 1 : clamp(bCount||1));
+    state.bothWays=makeLanes(isOneway ? 0 : clamp(bwCount));
+
+    // --- per-lane values ---
+    var busAlias=false;
+    function fillGroup(arr, suffixes){
+      if(!arr.length) return;
+      CATS.forEach(function(cat){
+        var chosen=null, chosenKey=null;
+        suffixes.forEach(function(sfx){
+          laneKeys(cat,sfx).forEach(function(k){
+            var v=take(k);
+            if(v===null) return;
+            if(chosen===null){
+              chosen=v; chosenKey=k;
+              if(k.indexOf('bus:lanes')===0) busAlias=true;
+            } else warn('Both '+chosenKey+' and '+k+' present — used '+chosenKey+'.');
+          });
+        });
+        if(chosen===null) return;
+        var parts=chosen.split('|');
+        if(parts.length!==arr.length) warn(chosenKey+' has '+parts.length+' value(s) for '+arr.length+' lane(s).');
+        parts.forEach(function(rawVal, i){
+          if(i>=arr.length) return;
+          var val=rawVal.trim().toLowerCase();
+          if(val==='') return;   // an empty slot means "not specified for this lane"
+          if(cat==='turn'){
+            val.split(';').forEach(function(t){
+              t=t.trim();
+              if(!t) return;
+              if(TURN_VALUES[t]) arr[i].turns.add(t);
+              else warn('Unknown turn value "'+t+'" in '+chosenKey+' — ignored.');
+            });
+          } else if(defsHas(DEFS_BY_CAT[cat], val)) {
+            arr[i][cat]=val;
+          } else {
+            warn('Unsupported value "'+val+'" in '+chosenKey+' — ignored.');
+          }
+        });
+      });
+    }
+    fillGroup(state.forward, fwdSuffixes);
+    if(!isOneway){
+      fillGroup(state.backward, [':backward']);
+      fillGroup(state.bothWays, [':both_ways']);
+      var bareKeys=[];
+      CATS.forEach(function(cat){
+        laneKeys(cat,'').forEach(function(k){ if(take(k)!==null) bareKeys.push(k); });
+      });
+      if(bareKeys.length) warn(bareKeys.join(', ')+' has no :forward/:backward suffix, so it can’t be split across a two-way street — not read.');
+    }
+
+    // --- contraflow cycling ---
+    state.contraflow={on:false, side:'left', type:'lane'};
+    var OPPOSITE={opposite:'shared', opposite_lane:'lane', opposite_track:'track'};
+    var obic=take('oneway:bicycle'), cwPlain=take('cycleway');
+    var sideVal={left:take('cycleway:left'), right:take('cycleway:right'), both:take('cycleway:both')};
+    var sideDir={left:take('cycleway:left:oneway'), right:take('cycleway:right:oneway'), both:take('cycleway:both:oneway')};
+
+    if(cwPlain!==null){
+      var cp=cwPlain.toLowerCase();
+      if(OPPOSITE[cp]){
+        state.contraflow={on:true, side:'left', type:OPPOSITE[cp]};
+        warn('cycleway='+cp+' was deprecated by vote in 2024 — read as contraflow on the left; check the side, then copy the replacement tags back.');
+      } else if(cp!=='no'){
+        warn('cycleway='+cwPlain+' runs with traffic — not modelled here; add it as a lane card instead.');
+      }
+    }
+    ['left','right','both'].forEach(function(sd){
+      var v=sideVal[sd];
+      if(v===null) return;
+      var lv=v.toLowerCase(), side = sd==='both' ? 'left' : sd, contra=false;
+      if(OPPOSITE[lv]){
+        warn('cycleway:'+sd+'='+lv+' is deprecated — read as cycleway:'+side+'='+OPPOSITE[lv]+' + cycleway:'+side+':oneway=-1.');
+        state.contraflow={on:true, side:side, type:OPPOSITE[lv]};
+        contra=true;
+      } else if((sideDir[sd]||'')==='-1' && (lv==='lane'||lv==='track')){
+        state.contraflow={on:true, side:side, type:lv};
+        contra=true;
+      } else if(lv!=='no'){
+        warn('cycleway:'+sd+'='+v+' runs with traffic — not modelled here; add it as a lane card instead.');
+      }
+      if(contra && sd==='both') warn('cycleway:both read as the left side — this tool tags one contraflow side.');
+    });
+    if(!state.contraflow.on && obic!==null && obic.toLowerCase()==='no'){
+      state.contraflow={on:true, side:'left', type:'shared'};
+    }
+    if(state.contraflow.on && !(isOneway && onewayTag)){
+      state.contraflow.on=false;
+      warn('Contraflow tags only mean something alongside oneway=yes — dropped.');
+    }
+
+    // --- on-street parking ---
+    state.parking={left:{type:'',orientation:''}, right:{type:'',orientation:''}};
+    function readPark(target, tv, ov, base){
+      if(tv!==null && tv!==''){
+        var v=tv.toLowerCase();
+        if(defsHas(PARKING_DEFS,v)) target.type=v;
+        else warn('Unsupported '+base+'='+tv+' — ignored.');
+      }
+      if(ov!==null && ov!==''){
+        var o=ov.toLowerCase();
+        if(defsHas(ORIENTATION_DEFS,o)) target.orientation=o;
+        else warn('Unsupported '+base+':orientation='+ov+' — ignored.');
+      }
+    }
+    var pBoth=take('parking:both'), pBothO=take('parking:both:orientation');
+    if(pBoth!==null || pBothO!==null){
+      var both={type:'',orientation:''};
+      readPark(both, pBoth, pBothO, 'parking:both');
+      state.parking.left={type:both.type, orientation:both.orientation};
+      state.parking.right={type:both.type, orientation:both.orientation};
+    }
+    // A per-side key beats the :both shorthand it overrides.
+    readPark(state.parking.left, take('parking:left'), take('parking:left:orientation'), 'parking:left');
+    readPark(state.parking.right, take('parking:right'), take('parking:right:orientation'), 'parking:right');
+
+    var oldParking=Object.keys(seen).filter(function(k){
+      return k.indexOf('parking:lane')===0 || k.indexOf('parking:condition')===0;
+    });
+    if(oldParking.length){
+      oldParking.forEach(function(k){ used[k]=1; });
+      warn('parking:lane:* / parking:condition:* is deprecated and wasn’t read — re-tag as parking:left/right=* plus :orientation=*.');
+    }
+
+    if(busAlias) note('bus:lanes read into the Bus field — it gets written back as psv:lanes.');
+    var ignored=Object.keys(seen).filter(function(k){ return !used[k]; });
+
+    updateControlsFromState();
+    renderAll();
+    return {ok:true, count:Object.keys(seen).length-ignored.length,
+      warns:warns, notes:notes, ignored:ignored, junk:parsed.junk};
+  }
+
+  function showPasteStatus(rep){
+    var box=document.getElementById('pasteStatus');
+    box.innerHTML='';
+    function line(str, cls){
+      var d=document.createElement('div');
+      if(cls) d.className=cls;
+      d.textContent=str;
+      box.appendChild(d);
+    }
+    if(rep.ok) line('✓ Read '+rep.count+' tag'+(rep.count===1?'':'s')+' into the editor.');
+    rep.notes.forEach(function(n){ line('· '+n, 'dim'); });
+    rep.warns.forEach(function(w){ line('⚠ '+w, 'warn'); });
+    if(rep.ignored.length){
+      var shown=rep.ignored.slice(0,10).join(', ');
+      line('Left alone (not lane tags): '+shown+(rep.ignored.length>10 ? ' + '+(rep.ignored.length-10)+' more' : ''), 'dim');
+    }
+    if(rep.junk.length) line(rep.junk.length+' line(s) skipped — no key=value pair found.', 'dim');
+  }
+
+  // ---------- top-level render ----------
+  function renderAll(){
+    document.getElementById('backwardFieldset').style.display = state.mode==='twoway' ? '' : 'none';
+    document.getElementById('bothWaysFieldset').style.display = state.mode==='twoway' ? '' : 'none';
+    document.getElementById('drivingSideWrap').style.display = state.mode==='twoway' ? '' : 'none';
+    document.getElementById('onewayTagWrap').style.display = state.mode==='oneway' ? '' : 'none';
+    document.getElementById('forwardLegend').textContent = state.mode==='twoway' ? 'Forward lanes' : 'Lanes';
+    document.getElementById('contraflowRow').style.display = (state.mode==='oneway' && state.onewayTag) ? '' : 'none';
+    contraflowEls.side.disabled = contraflowEls.type.disabled = !state.contraflow.on;
+    ['left','right'].forEach(function(sd){
+      parkingEls[sd].orient.disabled = !PARKING_PHYSICAL[state.parking[sd].type];
+    });
+
+    renderLaneGroup(document.getElementById('forwardLanes'), 'forward', 1);
+    if(state.mode==='twoway'){
+      renderLaneGroup(document.getElementById('backwardLanes'), 'backward', 1);
+      renderLaneGroup(document.getElementById('bothWaysLanes'), 'bothWays', 0);
+    }
+    renderViz();
+    renderOutput();
+  }
+
+  function updateControlsFromState(){
+    document.getElementById('modeSelect').value = state.mode;
+    document.getElementById('drivingSide').value = state.drivingSide;
+    document.getElementById('onewayTag').checked = state.onewayTag;
+    contraflowEls.chk.checked = state.contraflow.on;
+    contraflowEls.side.value = state.contraflow.side;
+    contraflowEls.type.value = state.contraflow.type;
+    ['left','right'].forEach(function(sd){
+      parkingEls[sd].type.value = state.parking[sd].type;
+      parkingEls[sd].orient.value = state.parking[sd].orientation;
+    });
+  }
+
+  // ---------- wiring ----------
+  wireLaneRowDrop(document.getElementById('forwardLanes'), 'forward');
+  wireLaneRowDrop(document.getElementById('backwardLanes'), 'backward');
+  wireLaneRowDrop(document.getElementById('bothWaysLanes'), 'bothWays');
+  buildLaneDefaultsRow(document.getElementById('laneDefaults'));
+  contraflowEls = buildContraflowRow(document.getElementById('contraflowRow'));
+  parkingEls = buildParkingRows(document.getElementById('parkingRows'));
+
+  document.getElementById('loadBtn').addEventListener('click', function(){
+    showPasteStatus(loadFromText(document.getElementById('pasteInput').value));
+  });
+  document.getElementById('pasteClearBtn').addEventListener('click', function(){
+    document.getElementById('pasteInput').value='';
+    document.getElementById('pasteStatus').innerHTML='';
+  });
+  document.getElementById('pasteInput').addEventListener('keydown', function(e){
+    if((e.metaKey||e.ctrlKey) && e.key==='Enter'){
+      e.preventDefault();
+      document.getElementById('loadBtn').click();
+    }
+  });
+
+  document.getElementById('modeSelect').addEventListener('change', function(e){ state.mode=e.target.value; renderAll(); });
+  document.getElementById('drivingSide').addEventListener('change', function(e){ state.drivingSide=e.target.value; renderAll(); });
+  document.getElementById('onewayTag').addEventListener('change', function(e){ state.onewayTag=e.target.checked; renderAll(); });
+
+  document.getElementById('copyBtn').addEventListener('click', function(){
+    var btn=document.getElementById('copyBtn');
+    navigator.clipboard.writeText(document.getElementById('output').textContent).then(function(){
+      var orig=btn.textContent; btn.textContent='Copied!';
+      setTimeout(function(){ btn.textContent=orig; }, 1200);
+    });
+  });
+
+  var darkBtn=document.getElementById('darkmode');
+  function applyTheme(dark){
+    document.body.classList.toggle('dark', dark);
+    darkBtn.textContent = dark ? '☀️' : '🌙';
+  }
+  var savedTheme = localStorage.getItem('lane-tagger-theme');
+  var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(savedTheme ? savedTheme==='dark' : prefersDark);
+  darkBtn.addEventListener('click', function(){
+    var dark = !document.body.classList.contains('dark');
+    applyTheme(dark);
+    localStorage.setItem('lane-tagger-theme', dark ? 'dark' : 'light');
+  });
+
+  updateControlsFromState();
+  renderAll();
+})();
+</script>
+</body>
+</html>
